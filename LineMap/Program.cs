@@ -7,6 +7,7 @@ using PLCConnector.L2;
 using LineMap.Messages;
 using PLCConnector.Siemens;
 using System.Threading;
+using LineMap.Messages.PA;
 
 namespace LineMap
 {
@@ -47,7 +48,6 @@ namespace LineMap
         {
             var l2_db = L2HandshakeProtocol.GetL2DBDescriptor();
             l2_db = client.ReadData(l2_db_raw, ref l2_db);
-            var pos_write = (int)l2_db["POS_WRITE"].Value;
             var messages = L2HandshakeProtocol.GetMessagesFromL2DB(l2_db, out total_words_read);
 
             if (messages.Count() > 0)

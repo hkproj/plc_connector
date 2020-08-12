@@ -12,17 +12,41 @@ namespace PLCConnector.L2
 
         }
 
-        public int MSG_LEN => this[0].As<int>();
+        public int MSG_LEN
+        {
+            get { return this[0].As<int>(); }
+            set { this[0].Value = value; }
+        }
 
-        public int PR_MSG => this[1].As<int>();
+        public int PR_MSG
+        {
+            get { return this[1].As<int>(); }
+            set { this[1].Value = value; }
+        }
 
-        public int ID_MSG => this[2].As<int>();
+        public int ID_MSG
+        {
+            get { return this[2].As<int>(); }
+            set { this[2].Value = value; }
+        }
 
-        public int ID_PLC => this[3].As<int>();
+        public int ID_PLC
+        {
+            get { return this[3].As<int>(); }
+            set { this[3].Value = value; }
+        }
 
-        public int ID_SRC => this[4].As<int>();
+        public int ID_SRC
+        {
+            get { return this[4].As<int>(); }
+            set { this[4].Value = value; }
+        }
 
-        public int FOOTER => this[Fields.Count - 1].As<int>();
+        public int FOOTER
+        {
+            get { return this[5].As<int>(); }
+            set { this[5].Value = value; }
+        }
 
     }
 }

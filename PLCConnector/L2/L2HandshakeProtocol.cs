@@ -22,6 +22,24 @@ namespace PLCConnector.L2
 
         public static readonly string GENERIC_MESSAGE_DATA_NAME = "DATA";
 
+        public static int PROGRESSIVE_COUNTER = 100;
+
+        public static int GetNextProgressive()
+        {
+            return (PROGRESSIVE_COUNTER++);
+        }
+
+        public static bool CheckMessageCorrectness(int id_plc, int id_src, int id_msg, GenericL2Message message)
+        {
+            return
+                (message.ID_MSG == id_msg) &&
+                (message.PR_MSG != 0 || true) && // Skip this test
+                (message.ID_PLC == id_plc) &&
+                (message.ID_SRC == id_src) &&
+                (message.MSG_LEN == message.Fields.Count) &&
+                (message.FOOTER == message.Fields.Count);
+        }
+
         public static DataBlock GenerateL2MessageDescriptor(IEnumerable<string> fields_names)
         {
             var fields = new List<DataField>();

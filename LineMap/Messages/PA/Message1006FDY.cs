@@ -4,7 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 
-namespace LineMap.Messages
+namespace LineMap.Messages.PA
 {
     public class Message1006FDY : Message1006
     {
