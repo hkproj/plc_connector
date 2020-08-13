@@ -44,8 +44,8 @@ namespace PLCConnector.L2
 
         public int FOOTER
         {
-            get { return this[5].As<int>(); }
-            set { this[5].Value = value; }
+            get { return this[this.Fields.Count - 1].As<int>(); }
+            set { this[this.Fields.Count - 1].Value = value; }
         }
 
     }

@@ -8,20 +8,39 @@ using LineMap.Messages;
 using PLCConnector.Siemens;
 using System.Threading;
 using LineMap.Messages.PA;
+using LineMap.Managers;
 
 namespace LineMap
 {
     class Program
     {
 
-        const string PLC_ADDRESS = "172.21.1.100";
+        static ILogger log;
 
         static void Main(string[] args)
         {
-            var log = new LoggerConfiguration()
+            log = new LoggerConfiguration()
                 .MinimumLevel.Debug()
                 .WriteTo.ColoredConsole()
                 .CreateLogger();
+
+            var sa_manager = new StackerCraneInteractiveManager(new DeviceConfiguration()
+            {
+                FifoInDBNumber = 300,
+                FifoInPosDBNumber = 301,
+                FifoOutDBNumber = 302,
+                FifoOutPosDBNumber = 303,
+                IDDevice = 3400 + 5,
+                IDPlc = 40 + 5,
+                IPAddress = "172.21.3.150"
+            }, log);
+
+            sa_manager.Start();
+        }
+
+        static void PollPAMessages()
+        {
+            const string PLC_ADDRESS = "172.21.1.100";
 
             while (true)
             {

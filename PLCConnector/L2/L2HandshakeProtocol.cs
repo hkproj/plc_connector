@@ -106,14 +106,17 @@ namespace PLCConnector.L2
 
         public static DataBlock GetL2DBDescriptor()
         {
-            List<string> fields_names = new List<string>();
-            fields_names.Add(L2_FIFO_OUT_POS_WRITE_NAME);
+            List<string> fields_names = new List<string>
+            {
+                L2_FIFO_OUT_POS_WRITE_NAME
+            };
+
             fields_names.AddRange(GetRepeatedFieldNames(L2_FIFO_OUT_WORD_NAME, (L2_DB_SIZE_DINT - 1)));
 
             return GenerateL2MessageDescriptor(fields_names);
         }
 
-        public static DataBlock GetL2HandshakeResponse(int total_words_read)
+        public static DataBlock GetL2HandshakeResponseDescriptor()
         {
             var fields_names = new List<string>()
             {
@@ -121,8 +124,14 @@ namespace PLCConnector.L2
             };
 
             var response = GenerateL2MessageDescriptor(fields_names);
-            response.Fields[0].Value = total_words_read;
 
+            return response;
+        }
+
+        public static DataBlock GetL2HandshakeResponse(int total_words_read)
+        {
+            var response = GetL2HandshakeResponseDescriptor();
+            response.Fields[0].Value = total_words_read;
             return response;
         }
 

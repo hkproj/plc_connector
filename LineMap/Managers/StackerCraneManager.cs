@@ -1,5 +1,6 @@
 ﻿using LineMap.Messages.SA;
 using PLCConnector.L2;
+using PLCConnector.Siemens;
 using System;
 using System.Collections.Generic;
 using System.Text;
@@ -13,11 +14,14 @@ namespace LineMap.Managers
         const int MISSION_TYPE_DEPOSIT = 2;
         const int MISSION_TYPE_MOVE = 3;
 
-        public int ID_PLC { get; set; }
+        protected DeviceConfiguration Device { get; }
 
-        public StackerCraneManager(int id_plc)
+        protected SiemensClient Client { get; }
+
+        public StackerCraneManager(DeviceConfiguration device)
         {
-            this.ID_PLC = id_plc;
+            this.Device = device;
+            this.Client = new SiemensClient(Device.IPAddress);
         }
 
         public Message2012 PickMission(int order_id, int mission_id, int device_nr, int src_device, int src_side, int src_level, int src_position, int track_id)
@@ -77,7 +81,7 @@ namespace LineMap.Managers
         public bool CheckResultCorrectness(Message2013 result)
         {
             return 
-                L2HandshakeProtocol.CheckMessageCorrectness(ID_PLC, 1, 2012, result) &&
+                L2HandshakeProtocol.CheckMessageCorrectness(Device.IDPlc, 1, 2012, result) &&
 
                 (result.ORDER_ID != 0) &&
                 (result.MISSION_ID != 0) &&
@@ -98,7 +102,7 @@ namespace LineMap.Managers
 
         Message2012 GetEmptyMessage2012()
         {
-            var message = new Message2012(L2HandshakeProtocol.GetL2MessageFromDataFields(new List<string>()
+            return new Message2012(L2HandshakeProtocol.GetL2MessageFromDataFields(new List<string>()
             {
                 nameof(Message2012.ORDER_ID),
                 nameof(Message2012.MISSION_ID),
@@ -114,16 +118,11 @@ namespace LineMap.Managers
                 nameof(Message2012.DST_LEVEL),
                 nameof(Message2012.DST_POSITION),
                 nameof(Message2012.BARCODE)
-            }));
-
-            message.MSG_LEN = 20;
-            message.PR_MSG = L2HandshakeProtocol.GetNextProgressive();
-            message.ID_MSG = 2012;
-            message.ID_SRC = 1;
-            message.ID_PLC = ID_PLC;
-            message.FOOTER = 20;
-
-            return message;
+            }))
+            {
+                PR_MSG = L2HandshakeProtocol.GetNextProgressive(),
+                ID_PLC = Device.IDPlc
+            };
         }
 
     }

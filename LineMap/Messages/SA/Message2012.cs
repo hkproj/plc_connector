@@ -11,7 +11,10 @@ namespace LineMap.Messages.SA
 
         public Message2012(DataBlock other) : base(other)
         {
-
+            this.ID_MSG = 2012;
+            this.ID_SRC = 1;
+            this.MSG_LEN = 20;
+            this.FOOTER = 20;
         }
 
         public int ORDER_ID
