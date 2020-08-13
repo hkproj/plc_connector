@@ -20,6 +20,7 @@ namespace LineMap.Managers
         const int MISSION_TYPE_DEPOSIT = 2;
         const int MISSION_TYPE_MOVE = 3;
 
+        const int STEP_RESULT_OK = 1;
         const int STEP_RESULT_RACK_ON_BOARD = 2;
         const int STEP_RESULT_EMPTY_TO_EMPTY = 5;
 
@@ -85,7 +86,7 @@ namespace LineMap.Managers
         {
             var l2_handshake_db = L2HandshakeProtocol.GetL2HandshakeDescriptor();
             l2_handshake_db.Fields[0].Value = value;
-            var l2_handshake_db_raw = new byte[4];
+            var l2_handshake_db_raw = new byte[L2HandshakeProtocol.DINT_SIZE];
             Client.WriteData(ref l2_handshake_db_raw, l2_handshake_db);
             Client.WriteRawData(db_number, 0, l2_handshake_db_raw.Length, l2_handshake_db_raw);
         }
@@ -310,32 +311,24 @@ namespace LineMap.Managers
 
         string MissionTypeDescription(int mission_type)
         {
-            switch (mission_type)
+            return mission_type switch
             {
-                case MISSION_TYPE_PICK:
-                    return "PICK";
-                case MISSION_TYPE_DEPOSIT:
-                    return "DEPOSIT";
-                case MISSION_TYPE_MOVE:
-                    return "MOVE";
-                default:
-                    return "UNKNOWN";
-            }
+                MISSION_TYPE_PICK => "PICK",
+                MISSION_TYPE_DEPOSIT => "DEPOSIT",
+                MISSION_TYPE_MOVE => "MOVE",
+                _ => "UNKNOWN",
+            };
         }
 
         string DeviceDescription(int device)
         {
-            switch (device)
+            return device switch
             {
-                case DEVICE_WAREHOUSE:
-                    return "WAREHOUSE";
-                case DEVICE_RACK_HANDLER:
-                    return "RACK HANDLER";
-                case DEVICE_RACK_INSERTION_STATION:
-                    return "RACK INSERTION STATION";
-                default:
-                    return "UNKNOWN";
-            }
+                DEVICE_WAREHOUSE => "WAREHOUSE",
+                DEVICE_RACK_HANDLER => "RACK HANDLER",
+                DEVICE_RACK_INSERTION_STATION => "RACK INSERTION STATION",
+                _ => "UNKNOWN",
+            };
         }
 
 
@@ -564,7 +557,11 @@ namespace LineMap.Managers
 
                 // Results
                 (result.STEP_RESULT >= 1 && result.STEP_RESULT <= 11) &&
-                (result.MISSION_RESULT >= 1 && result.MISSION_RESULT <= 4);
+                (result.MISSION_RESULT >= 1 && result.MISSION_RESULT <= 4) &&
+
+                // Abort management
+                ((result.MISSION_RESULT == MISSION_RESULT_COMPLETED && result.STEP_RESULT == STEP_RESULT_OK) || result.MISSION_RESULT != MISSION_RESULT_COMPLETED) &&
+                ((result.MISSION_RESULT == MISSION_RESULT_ABORTED && result.STEP_RESULT != STEP_RESULT_OK) || result.MISSION_RESULT != MISSION_RESULT_ABORTED);
         }
 
         Message2012 GetEmptyMessage2012()
