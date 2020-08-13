@@ -2,6 +2,8 @@
 using System.Linq;
 using System.Collections.Generic;
 using System.Text;
+using System.IO;
+using PLCConnector.Siemens;
 
 namespace PLCConnector.L2
 {
@@ -18,7 +20,7 @@ namespace PLCConnector.L2
         static readonly string L2_FIFO_OUT_WORD_NAME = "FIFO_DW";
         static readonly string L2_FIFO_OUT_POS_WRITE_NAME = "POS_WRITE";
 
-        static readonly string L2_FIFO_OUT_READ_DATA_NAME = "READ";
+        static readonly string L2_HANDSHAKE_DATA_NAME = "POS";
 
         public static readonly string GENERIC_MESSAGE_DATA_NAME = "DATA";
 
@@ -116,22 +118,15 @@ namespace PLCConnector.L2
             return GenerateL2MessageDescriptor(fields_names);
         }
 
-        public static DataBlock GetL2HandshakeResponseDescriptor()
+        public static DataBlock GetL2HandshakeDescriptor()
         {
             var fields_names = new List<string>()
             {
-                L2_FIFO_OUT_READ_DATA_NAME
+                L2_HANDSHAKE_DATA_NAME
             };
 
             var response = GenerateL2MessageDescriptor(fields_names);
 
-            return response;
-        }
-
-        public static DataBlock GetL2HandshakeResponse(int total_words_read)
-        {
-            var response = GetL2HandshakeResponseDescriptor();
-            response.Fields[0].Value = total_words_read;
             return response;
         }
 

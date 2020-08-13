@@ -11,86 +11,131 @@ using System.Threading;
 
 namespace LineMap.Managers
 {
-    public class StackerCraneInteractiveManager : StackerCraneManager
+    public class StackerCraneInteractiveManager
     {
 
         readonly ILogger Log;
 
-        int[,,] Racks { get; set; }
+        const int MISSION_TYPE_PICK = 1;
+        const int MISSION_TYPE_DEPOSIT = 2;
+        const int MISSION_TYPE_MOVE = 3;
 
-        const int COLUMNS = 31;
-        const int ROWS = 8;
-        const int SIDES = 2;
+        const int STEP_RESULT_RACK_ON_BOARD = 2;
+        const int STEP_RESULT_EMPTY_TO_EMPTY = 5;
+
+        const int MISSION_RESULT_COMPLETED = 1;
+        const int MISSION_RESULT_ABORTED = 2;
+
+        protected DeviceConfiguration Device { get; }
+
+        protected SiemensClient Client { get; }
+
+        int[,,] Racks { get; set; }
 
         const int EMPTY_CELL_RACK_ID = 0;
         const int MOCK_RACK_ID = 1992;
         const int MOCK_ORDER_ID = 147;
         const int MOCK_MISSION_ID = 852;
 
+        const int WAREHOUSE_SIDE_MIN = 1;
+        const int WAREHOUSE_SIDE_MAX = 2;
+        const int WAREHOUSE_LEVEL_MIN = 1;
+        const int WAREHOUSE_LEVEL_MAX = 8;
+        const int WAREHOUSE_POSITION_MIN = 1;
+        const int WAREHOUSE_POSITION_MAX = 31;
+
+        const int DEVICE_WAREHOUSE = 1;
+        const int DEVICE_RACK_HANDLER = 2;
+        const int DEVICE_RACK_INSERTION_STATION = 3;
+
         const int SLEEP_TIME = 50;
 
-        public StackerCraneInteractiveManager(DeviceConfiguration device, ILogger log) : base(device)
+        public StackerCraneInteractiveManager(DeviceConfiguration device, ILogger log)
         {
+            this.Device = device;
+            this.Client = new SiemensClient(Device.IPAddress);
             this.Log = log;
-            this.Racks = new int[SIDES, ROWS, COLUMNS];
+            this.Racks = new int[WAREHOUSE_SIDE_MAX, WAREHOUSE_LEVEL_MAX, WAREHOUSE_POSITION_MAX];
         }
 
         void MakeAllSameID(int rack_id)
         {
-            for (int s = 0; s < SIDES; s++)
+            for (int s = 0; s < WAREHOUSE_SIDE_MAX; s++)
             {
-                for (int r = 0; r < ROWS; r++)
+                for (int l = 0; l < WAREHOUSE_LEVEL_MAX; l++)
                 {
-                    for (int c = 0; c < COLUMNS; c++)
+                    for (int c = 0; c < WAREHOUSE_POSITION_MAX; c++)
                     {
-                        Racks[s, r, c] = rack_id;
+                        Racks[s, l, c] = rack_id;
                     }
                 }
             }
         }
 
+        int ReadL2HandshakeData(int db_number)
+        {
+            var l2_handshake_db_raw = Client.ReadRawData(db_number, 0, L2HandshakeProtocol.DINT_SIZE);
+            var l2_handshake_db = L2HandshakeProtocol.GetL2HandshakeDescriptor();
+            l2_handshake_db = Client.ReadData(l2_handshake_db_raw, ref l2_handshake_db);
+
+            return l2_handshake_db.Fields[0].As<int>();
+        }
+
+        void WriteL2HandshakeData(int db_number, int value)
+        {
+            var l2_handshake_db = L2HandshakeProtocol.GetL2HandshakeDescriptor();
+            l2_handshake_db.Fields[0].Value = value;
+            var l2_handshake_db_raw = new byte[4];
+            Client.WriteData(ref l2_handshake_db_raw, l2_handshake_db);
+            Client.WriteRawData(db_number, 0, l2_handshake_db_raw.Length, l2_handshake_db_raw);
+        }
+
+        byte[] GetL2BufferToSendMessages(IEnumerable<GenericL2Message> messages)
+        {
+            int total_msg_len = messages.Sum(m => m.MSG_LEN);
+            var plc_buffer = new byte[(total_msg_len + 1) * L2HandshakeProtocol.DINT_SIZE];
+            int current_offset = L2HandshakeProtocol.DINT_SIZE;
+
+            for (var i = 0; i < messages.Count(); i++)
+            {
+                var msg = messages.ElementAt(i);
+                var msg_buffer = new byte[msg.MSG_LEN * L2HandshakeProtocol.DINT_SIZE];
+                Client.WriteData(ref msg_buffer, msg);
+
+                Array.Copy(msg_buffer, 0, plc_buffer, current_offset, msg_buffer.Length);
+                current_offset += msg_buffer.Length;
+            }
+
+            var l2_fifo_in_pos_write_db = L2HandshakeProtocol.GetL2HandshakeDescriptor();
+            l2_fifo_in_pos_write_db.Fields[0].Value = total_msg_len;
+            var l2_fifo_in_pos_write_raw = new byte[L2HandshakeProtocol.DINT_SIZE];
+            Client.WriteData(ref l2_fifo_in_pos_write_raw, l2_fifo_in_pos_write_db);
+
+            Array.Copy(l2_fifo_in_pos_write_raw, 0, plc_buffer, 0, l2_fifo_in_pos_write_raw.Length);
+
+            return plc_buffer;
+        }
+
         void DisplayFIFOINStatus()
         {
-            var l2_fifo_in_pos_read_raw = Client.ReadRawData(Device.FifoInPosDBNumber, 0, L2HandshakeProtocol.DINT_SIZE);
-            var l2_fifo_in_pos_read_db = L2HandshakeProtocol.GetL2HandshakeResponseDescriptor();
-            l2_fifo_in_pos_read_db = Client.ReadData(l2_fifo_in_pos_read_raw, ref l2_fifo_in_pos_read_db);
-
-            var l2_fifo_in_pos_write_raw = Client.ReadRawData(Device.FifoInDBNumber, 0, L2HandshakeProtocol.DINT_SIZE);
-            var l2_fifo_in_pos_write_db = L2HandshakeProtocol.GetL2HandshakeResponseDescriptor();
-            l2_fifo_in_pos_write_db = Client.ReadData(l2_fifo_in_pos_write_raw, ref l2_fifo_in_pos_write_db);
-
-            Log.Information($"FIFO_IN_POS_WRITE {l2_fifo_in_pos_write_db.Fields[0].As<int>()} - FIFO_IN_POS_READ {l2_fifo_in_pos_read_db.Fields[0].As<int>()}");
+            Log.Information($"FIFO_IN_POS_WRITE {ReadL2HandshakeData(Device.FifoInPosDBNumber)} - FIFO_IN_POS_READ {ReadL2HandshakeData(Device.FifoInDBNumber)}");
         }
 
         bool PrepareFIFOToSend()
         {
-            var l2_fifo_in_pos_read_raw = Client.ReadRawData(Device.FifoInPosDBNumber, 0, L2HandshakeProtocol.DINT_SIZE);
-            var l2_fifo_in_pos_read_db = L2HandshakeProtocol.GetL2HandshakeResponseDescriptor();
-            l2_fifo_in_pos_read_db = Client.ReadData(l2_fifo_in_pos_read_raw, ref l2_fifo_in_pos_read_db);
+            var l2_fifo_in_pos_read = ReadL2HandshakeData(Device.FifoInPosDBNumber);
+            var l2_fifo_in_pos_write = ReadL2HandshakeData(Device.FifoInDBNumber);
 
-            var l2_fifo_in_pos_write_raw = Client.ReadRawData(Device.FifoInDBNumber, 0, L2HandshakeProtocol.DINT_SIZE);
-            var l2_fifo_in_pos_write_db = L2HandshakeProtocol.GetL2HandshakeResponseDescriptor();
-            l2_fifo_in_pos_write_db = Client.ReadData(l2_fifo_in_pos_write_raw, ref l2_fifo_in_pos_write_db);
-
-            if (l2_fifo_in_pos_read_db.Fields[0].As<int>() != 0)
+            if (l2_fifo_in_pos_read != 0)
             {
-                Log.Debug($"Emptying FIFO_IN and FIFO_IN_POS with {l2_fifo_in_pos_read_db.Fields[0].As<int>()} read words");
+                Log.Debug($"Emptying FIFO_IN and FIFO_IN_POS with {l2_fifo_in_pos_read} read words");
 
-                l2_fifo_in_pos_write_db = L2HandshakeProtocol.GetL2HandshakeResponseDescriptor();
-                l2_fifo_in_pos_write_db.Fields[0].Value = 0;
-                var handshake_response_raw = new byte[4];
-                Client.WriteData(ref handshake_response_raw, l2_fifo_in_pos_write_db);
-                Client.WriteRawData(Device.FifoInDBNumber, 0, handshake_response_raw.Length, handshake_response_raw);
-
-                l2_fifo_in_pos_read_db = L2HandshakeProtocol.GetL2HandshakeResponseDescriptor();
-                l2_fifo_in_pos_read_db.Fields[0].Value = 0;
-                handshake_response_raw = new byte[4];
-                Client.WriteData(ref handshake_response_raw, l2_fifo_in_pos_read_db);
-                Client.WriteRawData(Device.FifoInPosDBNumber, 0, handshake_response_raw.Length, handshake_response_raw);
+                WriteL2HandshakeData(Device.FifoInDBNumber, 0);
+                WriteL2HandshakeData(Device.FifoInPosDBNumber, 0);
 
                 return false;
             }
-            else if (l2_fifo_in_pos_read_db.Fields[0].As<int>() == 0 && l2_fifo_in_pos_write_db.Fields[0].As<int>() == 0)
+            else if (l2_fifo_in_pos_read == 0 && l2_fifo_in_pos_write == 0)
             {
                 Log.Debug($"FIFO_IN ready to accept commands");
                 return true;
@@ -112,70 +157,87 @@ namespace LineMap.Managers
             if (messages.Count() > 0)
             {
                 Log.Debug($"Emptying FIFO_OUT with {total_words_read} read words and {messages.Count()} total messages");
-                var handshake_response = L2HandshakeProtocol.GetL2HandshakeResponse(total_words_read);
-                var handshake_response_raw = new byte[4];
-                Client.WriteData(ref handshake_response_raw, handshake_response);
-                Client.WriteRawData(Device.FifoOutPosDBNumber, 0, handshake_response_raw.Length, handshake_response_raw);
+                WriteL2HandshakeData(Device.FifoOutPosDBNumber, total_words_read);
             }
 
             return messages;
         }
 
-        void SendDeposit(int side, int row, int pos, bool dequeue_first = true)
-        {
-            var mission = DepositMission(MOCK_ORDER_ID, MOCK_MISSION_ID, Device.IDDevice, 1, side, row, pos, MOCK_RACK_ID);
-            SendMissionAndDisplayResult(mission, dequeue_first);
-        }
-
-        void ChainMissions(int from_side, int from_level, int from_pos, int to_side, int to_level, int to_pos)
+        void ChainMissions(int from_side, int from_level, int from_pos, int to_side, int to_level, int to_pos, bool auto_next = false)
         {
             Log.Debug($"Starting chain from Side {from_side} Level {from_level} Position {from_pos} to Side {to_side} Level {to_level} Position {to_pos}");
 
             var stop = false;
-            var next = false;
-            var auto_next = false;
+
+            var missions = new List<Tuple<int, int, int>>();
 
             for (int side = from_side; side <= to_side; side++)
+            {
+                for (var level = (side == from_side ? from_level : 1); level <= to_level; level++)
+                {
+                    for (int position = (level == from_level && side == from_side ? from_pos : 1); position <= to_pos; position++)
+                    {
+                        missions.Add(new Tuple<int, int, int>(side, level, position));
+                    }
+                }
+            }
+
+            for (int m = 0; m < missions.Count; m++)
             {
                 if (stop)
                     break;
 
-                for (var level = (side == from_side ? from_level : 1); level <= to_level; level++)
+                var next = false;
+
+                var (side, level, position) = missions[m];
+
+                var pick_result = new Message2013(SendPick(DEVICE_WAREHOUSE, side, level, position, (side == from_side && level == from_level && position == from_pos)));
+
+                if (!CheckResultCorrectness(pick_result))
                 {
-                    if (stop)
-                        break;
+                    Log.Error("Invalid pick result received");
+                    stop = true;
+                }
+                else if (pick_result.MISSION_RESULT == MISSION_RESULT_ABORTED && pick_result.STEP_RESULT == STEP_RESULT_RACK_ON_BOARD)
+                {
+                    Log.Error("Can't pick, SA has rack on board");
+                    stop = true;
+                }
+                else if (pick_result.MISSION_RESULT == MISSION_RESULT_ABORTED && pick_result.STEP_RESULT == STEP_RESULT_EMPTY_TO_EMPTY)
+                {
+                    Log.Error("Skipping empty cell");
+                }
+                else
+                {
+                    var deposit_result = new Message2013(SendDeposit(DEVICE_WAREHOUSE, side, level, position, false));
 
-                    for (int position = (level == from_level && side == from_side ? from_pos : 1); position <= to_pos; position++)
+                    if (!CheckResultCorrectness(deposit_result))
                     {
-                        if (stop)
-                            break;
+                        Log.Error("Invalid deposit result received");
+                        stop = true;
+                    }
+                }
 
-                        next = false;
+                if (!auto_next)
+                {
+                    Console.WriteLine("Chain: next, autonext or stop");
 
-                        SendPick(side, level, position, (side == from_side && level == from_level && position == from_pos));
-                        SendDeposit(side, level, position, false);
+                    while (!next && !stop)
+                    {
+                        var command = Console.ReadLine().ToLower().Trim();
 
-                        if (!auto_next)
+                        if (command == "next")
+                            next = true;
+                        else if (command == "stop")
+                            stop = true;
+                        else if (command == "autonext")
                         {
-                            Console.WriteLine("Chain: next, autonext or stop");
-
-                            while (!next && !stop)
-                            {
-                                var command = Console.ReadLine().ToLower().Trim();
-
-                                if (command == "next")
-                                    next = true;
-                                else if (command == "stop")
-                                    stop = true;
-                                else if (command == "autonext")
-                                {
-                                    auto_next = true;
-                                    break;
-                                }
-                                else
-                                    continue;
-                            }
+                            Log.Verbose("Activating auto next on chain");
+                            auto_next = true;
+                            break;
                         }
+                        else
+                            continue;
                     }
                 }
             }
@@ -186,7 +248,7 @@ namespace LineMap.Managers
                 Log.Information("Chain successfully completed");
         }
 
-        void SendMissionAndDisplayResult(Message2012 mission, bool dequeue_first = true)
+        DataBlock SendMissionAndDisplayResult(Message2012 mission, bool dequeue_first = true)
         {
             if (dequeue_first)
                 DequeueAllMessages();
@@ -205,24 +267,14 @@ namespace LineMap.Managers
                     fifo_in_ready = PrepareFIFOToSend();
             }
 
-            var mission_raw = new byte[mission.MSG_LEN * L2HandshakeProtocol.DINT_SIZE];
-            Client.WriteData(ref mission_raw, mission);
-
-            var l2_fifo_in_pos_write_db = L2HandshakeProtocol.GetL2HandshakeResponseDescriptor();
-            l2_fifo_in_pos_write_db.Fields[0].Value = mission.MSG_LEN;
-            var l2_fifo_in_pos_write_raw = new byte[4];
-            Client.WriteData(ref l2_fifo_in_pos_write_raw, l2_fifo_in_pos_write_db);
-
-            var to_write_on_plc = new byte[mission_raw.Length + l2_fifo_in_pos_write_raw.Length];
-            Array.Copy(l2_fifo_in_pos_write_raw, 0, to_write_on_plc, 0, l2_fifo_in_pos_write_raw.Length);
-            Array.Copy(mission_raw, 0, to_write_on_plc, l2_fifo_in_pos_write_raw.Length, mission_raw.Length);
-
+            var to_write_on_plc = GetL2BufferToSendMessages(new List<Message2012>() { mission });
             Client.WriteRawData(Device.FifoInDBNumber, 0, to_write_on_plc.Length, to_write_on_plc);
 
             Log.Debug("Mission sent, waiting for results...");
 
             var results = DequeueAllMessages();
             var start_time_queue = DateTime.UtcNow;
+
             while (results.Count() == 0)
             {
                 Thread.Sleep(SLEEP_TIME);
@@ -235,6 +287,7 @@ namespace LineMap.Managers
             }
 
             DisplayMessages(results);
+            return results.First();
         }
 
         bool IntervalReached(DateTime start_time, int interval)
@@ -243,37 +296,59 @@ namespace LineMap.Managers
             return (interval_so_far > interval && (interval_so_far % interval == 0));
         }
 
-        void SendPick(int side, int row, int pos, bool dequeue_first = true)
+        DataBlock SendDeposit(int device, int side, int row, int pos, bool dequeue_first = true)
         {
-            var mission = PickMission(MOCK_ORDER_ID, MOCK_MISSION_ID, Device.IDDevice, 1, side, row, pos, MOCK_RACK_ID);
-            SendMissionAndDisplayResult(mission, dequeue_first);
+            var mission = DepositMission(MOCK_ORDER_ID, MOCK_MISSION_ID, Device.IDDevice, device, side, row, pos, MOCK_RACK_ID);
+            return SendMissionAndDisplayResult(mission, dequeue_first);
+        }
+
+        DataBlock SendPick(int device, int side, int row, int pos, bool dequeue_first = true)
+        {
+            var mission = PickMission(MOCK_ORDER_ID, MOCK_MISSION_ID, Device.IDDevice, device, side, row, pos, MOCK_RACK_ID);
+            return SendMissionAndDisplayResult(mission, dequeue_first);
         }
 
         string MissionTypeDescription(int mission_type)
         {
             switch (mission_type)
             {
-                case 1:
+                case MISSION_TYPE_PICK:
                     return "PICK";
-                case 2:
+                case MISSION_TYPE_DEPOSIT:
                     return "DEPOSIT";
-                case 3:
+                case MISSION_TYPE_MOVE:
                     return "MOVE";
                 default:
                     return "UNKNOWN";
             }
         }
 
+        string DeviceDescription(int device)
+        {
+            switch (device)
+            {
+                case DEVICE_WAREHOUSE:
+                    return "WAREHOUSE";
+                case DEVICE_RACK_HANDLER:
+                    return "RACK HANDLER";
+                case DEVICE_RACK_INSERTION_STATION:
+                    return "RACK INSERTION STATION";
+                default:
+                    return "UNKNOWN";
+            }
+        }
+
+
         void DisplayMessages(IEnumerable<DataBlock> results)
         {
             foreach (var result in results)
             {
                 var result_msg = new Message2013(result);
-                Log.Information($"MISSION {MissionTypeDescription(result_msg.MISSION_TYPE)} - DEVICE {result_msg.DEVICE} - SIDE {result_msg.SIDE} - LEV {result_msg.LEVEL} - POS {result_msg.POSITION} - STEP_RESULT {result_msg.STEP_RESULT} - MISSION_RESULT {result_msg.MISSION_RESULT}");
+                Log.Information($"MISSION {MissionTypeDescription(result_msg.MISSION_TYPE)} - DEVICE {DeviceDescription(result_msg.DEVICE)} - SIDE {result_msg.SIDE} - LEVEL {result_msg.LEVEL} - POSITION {result_msg.POSITION} - STEP_RESULT {result_msg.STEP_RESULT} - MISSION_RESULT {result_msg.MISSION_RESULT}");
             }
         }
 
-        void DisplayResult()
+        void DequeueAndDisplayAllMessages()
         {
             var messages = DequeueAllMessages();
 
@@ -337,10 +412,16 @@ namespace LineMap.Managers
                         continue;
                     }
 
+                    if (!CheckDeviceLimits(DEVICE_WAREHOUSE, side, level, position))
+                    {
+                        Log.Error("Invalid warehouse limits");
+                        continue;
+                    }
+
                     if (command.StartsWith("pick"))
-                        SendPick(side, level, position);
+                        SendPick(DEVICE_WAREHOUSE, side, level, position);
                     else if (command.StartsWith("dep"))
-                        SendDeposit(side, level, position);
+                        SendDeposit(DEVICE_WAREHOUSE, side, level, position);
                 }
                 else if (command.StartsWith("chain from"))
                 {
@@ -371,19 +452,19 @@ namespace LineMap.Managers
                         continue;
                     }
 
-                    if ((from_side < 1 || from_side > 2 || to_side < 1 || to_side > 2 || to_side < from_side) ||
-                        (from_level < 1 || from_level > 8 || to_level < 1 || to_level > 8 || to_level < from_level) ||
-                        (from_position < 1 || from_position > 31 || to_position < 1 || to_position > 31 || to_position < from_position))
+                    if (!CheckDeviceLimits(DEVICE_WAREHOUSE, from_side, from_level, from_position) ||
+                        !CheckDeviceLimits(DEVICE_WAREHOUSE, to_side, to_level, to_position) ||
+                        to_side < from_side || to_level < from_level || to_position < from_position)
                     {
-                        Log.Error("Invalid command format");
+                        Log.Error("Invalid warehouse limits");
                         continue;
                     }
 
                     ChainMissions(from_side, from_level, from_position, to_side, to_level, to_position);
                 }
-                else if (command == "display result")
+                else if (command == "display messages")
                 {
-                    DisplayResult();
+                    DequeueAndDisplayAllMessages();
                 }
                 else if (command == "prepare fifo in")
                 {
@@ -402,6 +483,113 @@ namespace LineMap.Managers
             }
 
             Console.WriteLine("Bye bye");
+        }
+
+        Message2012 PickMission(int order_id, int mission_id, int device_nr, int src_device, int src_side, int src_level, int src_position, int track_id)
+        {
+            var message = GetEmptyMessage2012();
+
+            message.ORDER_ID = order_id;
+            message.MISSION_ID = mission_id;
+            message.DEVICE_NR = device_nr;
+            message.MISSION_TYPE = MISSION_TYPE_PICK;
+            message.TRACK_ID = track_id;
+
+            message.SRC_DEVICE = src_device;
+            message.SRC_SIDE = src_side;
+            message.SRC_LEVEL = src_level;
+            message.SRC_POSITION = src_position;
+
+            return message;
+        }
+
+        Message2012 DepositMission(int order_id, int mission_id, int device_nr, int dst_device, int dst_side, int dst_level, int dst_position, int track_id)
+        {
+            var message = GetEmptyMessage2012();
+
+            message.ORDER_ID = order_id;
+            message.MISSION_ID = mission_id;
+            message.DEVICE_NR = device_nr;
+            message.MISSION_TYPE = MISSION_TYPE_DEPOSIT;
+            message.TRACK_ID = track_id;
+
+            message.DST_DEVICE = dst_device;
+            message.DST_SIDE = dst_side;
+            message.DST_LEVEL = dst_level;
+            message.DST_POSITION = dst_position;
+
+            return message;
+        }
+
+        Message2012 MoveMission(int order_id, int mission_id, int device_nr, int dst_device, int dst_side, int dst_level, int dst_position, int track_id)
+        {
+            var message = GetEmptyMessage2012();
+
+            message.ORDER_ID = order_id;
+            message.MISSION_ID = mission_id;
+            message.DEVICE_NR = device_nr;
+            message.MISSION_TYPE = MISSION_TYPE_MOVE;
+            message.TRACK_ID = track_id;
+
+            message.DST_DEVICE = dst_device;
+            message.DST_SIDE = dst_side;
+            message.DST_LEVEL = dst_level;
+            message.DST_POSITION = dst_position;
+
+            return message;
+        }
+
+        bool CheckDeviceLimits(int device, int side, int level, int position)
+        {
+            return
+                (device == DEVICE_WAREHOUSE && side >= WAREHOUSE_SIDE_MIN && side <= WAREHOUSE_SIDE_MAX && level >= WAREHOUSE_LEVEL_MIN && level <= WAREHOUSE_LEVEL_MAX && position >= WAREHOUSE_POSITION_MIN && position <= WAREHOUSE_POSITION_MAX) ||
+                (device == DEVICE_RACK_HANDLER && side == 1 && level == 0 && position == 0) ||
+                (device == DEVICE_RACK_INSERTION_STATION && side == 2 && level == 0 && position == 0);
+        }
+
+        bool CheckResultCorrectness(Message2013 result)
+        {
+            return
+                L2HandshakeProtocol.CheckMessageCorrectness(Device.IDPlc, 1, 2012, result) &&
+
+                (result.ORDER_ID != 0) &&
+                (result.MISSION_ID != 0) &&
+                (result.DEVICE_NR >= 3401 && result.DEVICE_NR <= 3405) &&
+                (result.MISSION_TYPE >= 1 && result.MISSION_TYPE <= 3) &&
+                (result.TRACK_ID != 0) &&
+                (result.DEVICE >= 1 && result.DEVICE <= 3) &&
+
+                // Side, level and position for each device
+                CheckDeviceLimits(result.DEVICE, result.SIDE, result.LEVEL, result.POSITION) &&
+
+                // Results
+                (result.STEP_RESULT >= 1 && result.STEP_RESULT <= 11) &&
+                (result.MISSION_RESULT >= 1 && result.MISSION_RESULT <= 4);
+        }
+
+        Message2012 GetEmptyMessage2012()
+        {
+            return new Message2012(L2HandshakeProtocol.GetL2MessageFromDataFields(new List<string>()
+            {
+                nameof(Message2012.ORDER_ID),
+                nameof(Message2012.MISSION_ID),
+                nameof(Message2012.DEVICE_NR),
+                nameof(Message2012.MISSION_TYPE),
+                nameof(Message2012.TRACK_ID),
+                nameof(Message2012.SRC_DEVICE),
+                nameof(Message2012.SRC_SIDE),
+                nameof(Message2012.SRC_LEVEL),
+                nameof(Message2012.SRC_POSITION),
+                nameof(Message2012.DST_DEVICE),
+                nameof(Message2012.DST_SIDE),
+                nameof(Message2012.DST_LEVEL),
+                nameof(Message2012.DST_POSITION),
+                nameof(Message2012.BARCODE)
+            }))
+            {
+                PR_MSG = L2HandshakeProtocol.GetNextProgressive(),
+                ID_PLC = Device.IDPlc
+            };
         }
 
     }
