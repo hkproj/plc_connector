@@ -164,7 +164,7 @@ namespace LineMap.Managers
             return messages;
         }
 
-        void ChainMissions(int from_side, int from_level, int from_pos, int to_side, int to_level, int to_pos, bool auto_next = false)
+        void ChainMissions(int from_side, int from_level, int from_pos, int to_side, int to_level, int to_pos, bool auto_next = false, bool shuffle = false)
         {
             Log.Debug($"Starting chain from Side {from_side} Level {from_level} Position {from_pos} to Side {to_side} Level {to_level} Position {to_pos}");
 
@@ -181,6 +181,12 @@ namespace LineMap.Managers
                         missions.Add(new Tuple<int, int, int>(side, level, position));
                     }
                 }
+            }
+
+            if (shuffle)
+            {
+                var rnd = new Random();
+                missions = missions.OrderBy(m => rnd.Next()).ToList();
             }
 
             for (int m = 0; m < missions.Count; m++)
@@ -208,6 +214,11 @@ namespace LineMap.Managers
                 {
                     Log.Error("Skipping empty cell");
                 }
+                else if (pick_result.MISSION_RESULT == MISSION_RESULT_ABORTED)
+                {
+                    Log.Error("Mission aborted, stopping chain.");
+                    stop = true;
+                }
                 else
                 {
                     var deposit_result = new Message2013(SendDeposit(DEVICE_WAREHOUSE, side, level, position, false));
@@ -215,6 +226,11 @@ namespace LineMap.Managers
                     if (!CheckResultCorrectness(deposit_result))
                     {
                         Log.Error("Invalid deposit result received");
+                        stop = true;
+                    }
+                    else if (deposit_result.MISSION_RESULT == MISSION_RESULT_ABORTED)
+                    {
+                        Log.Error("Deposit mission aborted, stopping chain.");
                         stop = true;
                     }
                 }
@@ -418,16 +434,13 @@ namespace LineMap.Managers
                 }
                 else if (command.StartsWith("chain from"))
                 {
-                    // chain from 1 1 1 to 1 2 2
-                    var args = command.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-
-                    if (args.Length != 9)
-                    {
-                        Log.Error("Invalid command format");
-                        continue;
-                    }
+                    // chain from 1 1 1 to 1 2 2 autonext shuffle
+                    var args = command.Split(' ', StringSplitOptions.RemoveEmptyEntries).Select(s => s.ToLower().Trim()).ToArray();
 
                     int from_side, from_level, from_position, to_side, to_level, to_position;
+
+                    bool auto_next = args.Contains("autonext");
+                    bool shuffle = args.Contains("shuffle");
 
                     try
                     {
@@ -453,7 +466,7 @@ namespace LineMap.Managers
                         continue;
                     }
 
-                    ChainMissions(from_side, from_level, from_position, to_side, to_level, to_position);
+                    ChainMissions(from_side, from_level, from_position, to_side, to_level, to_position, auto_next);
                 }
                 else if (command == "display messages")
                 {
