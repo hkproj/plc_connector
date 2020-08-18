@@ -93,26 +93,11 @@ namespace LineMap.Managers
 
         byte[] GetL2BufferToSendMessages(IEnumerable<GenericL2Message> messages)
         {
+            var buffer_db = L2HandshakeProtocol.GetL2SendBuffer(messages);
             int total_msg_len = messages.Sum(m => m.MSG_LEN);
             var plc_buffer = new byte[(total_msg_len + 1) * L2HandshakeProtocol.DINT_SIZE];
-            int current_offset = L2HandshakeProtocol.DINT_SIZE;
 
-            for (var i = 0; i < messages.Count(); i++)
-            {
-                var msg = messages.ElementAt(i);
-                var msg_buffer = new byte[msg.MSG_LEN * L2HandshakeProtocol.DINT_SIZE];
-                Client.WriteData(ref msg_buffer, msg);
-
-                Array.Copy(msg_buffer, 0, plc_buffer, current_offset, msg_buffer.Length);
-                current_offset += msg_buffer.Length;
-            }
-
-            var l2_fifo_in_pos_write_db = L2HandshakeProtocol.GetL2HandshakeDescriptor();
-            l2_fifo_in_pos_write_db.Fields[0].Value = total_msg_len;
-            var l2_fifo_in_pos_write_raw = new byte[L2HandshakeProtocol.DINT_SIZE];
-            Client.WriteData(ref l2_fifo_in_pos_write_raw, l2_fifo_in_pos_write_db);
-
-            Array.Copy(l2_fifo_in_pos_write_raw, 0, plc_buffer, 0, l2_fifo_in_pos_write_raw.Length);
+            Client.WriteData(ref plc_buffer, buffer_db);
 
             return plc_buffer;
         }
@@ -167,6 +152,8 @@ namespace LineMap.Managers
         void ChainMissions(int from_side, int from_level, int from_pos, int to_side, int to_level, int to_pos, bool auto_next = false, bool shuffle = false)
         {
             Log.Debug($"Starting chain from Side {from_side} Level {from_level} Position {from_pos} to Side {to_side} Level {to_level} Position {to_pos}");
+            Log.Debug($"Shuffle: {shuffle}");
+            Log.Debug($"Auto Next: {auto_next}");
 
             var stop = false;
 
@@ -182,6 +169,8 @@ namespace LineMap.Managers
                     }
                 }
             }
+
+            Log.Debug($"Total missions: {missions.Count}");
 
             if (shuffle)
             {
@@ -235,7 +224,7 @@ namespace LineMap.Managers
                     }
                 }
 
-                if (!auto_next)
+                if (!auto_next && !stop)
                 {
                     Console.WriteLine("Chain: next, autonext or stop");
 
@@ -257,6 +246,8 @@ namespace LineMap.Managers
                             continue;
                     }
                 }
+
+                Log.Debug($"Remaining {missions.Count - (m + 1)} missions");
             }
 
             if (stop)
@@ -392,6 +383,68 @@ namespace LineMap.Managers
                     MakeAllSameID(MOCK_RACK_ID);
                     Log.Information("All cells made full");
                 }
+                else if (command == "display empty cells")
+                {
+                    for (int side = 0; side < WAREHOUSE_SIDE_MAX; side++)
+                    {
+                        for (int level = 0; level < WAREHOUSE_LEVEL_MAX; level++)
+                        {
+                            for (int position = 0; position < WAREHOUSE_POSITION_MAX; position++)
+                            {
+                                if (Racks[side,level,position] == EMPTY_CELL_RACK_ID)
+                                    Log.Information($"Side {side + 1} Level {level + 1} Position {position + 1} Empty");
+                            }
+                        }
+                    }
+                }
+                else if (command.StartsWith("make cell"))
+                {
+                    var args = command.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+                    if (args.Length != 6)
+                    {
+                        Log.Error("Invalid command format");
+                        continue;
+                    }
+
+                    int side, level, position;
+
+                    try
+                    {
+                        side = int.Parse(args[2]);
+                        level = int.Parse(args[3]);
+                        position = int.Parse(args[4]);
+                    }
+                    catch (FormatException)
+                    {
+                        Log.Error("Error parsing command");
+                        continue;
+                    }
+
+                    if (!CheckDeviceLimits(DEVICE_WAREHOUSE, side, level, position))
+                    {
+                        Log.Error("Invalid warehouse limits");
+                        continue;
+                    }
+
+                    var operation = args[5].ToLower().Trim();
+
+                    if (operation == "full")
+                    {
+                        Racks[side, level, position] = MOCK_RACK_ID;
+                        Log.Information($"Side {side} Level {level} Position {position} made full");
+                    }
+                    else if (operation == "empty")
+                    {
+                        Racks[side, level, position] = EMPTY_CELL_RACK_ID;
+                        Log.Information($"Side {side} Level {level} Position {position} made empty");
+                    }
+                    else
+                    {
+                        Log.Error("Invalid operation");
+                        continue;
+                    }
+                }
                 else if (command == "empty fifo out")
                 {
                     DequeueAllMessages();
@@ -435,7 +488,7 @@ namespace LineMap.Managers
                 else if (command.StartsWith("chain from"))
                 {
                     // chain from 1 1 1 to 1 2 2 autonext shuffle
-                    var args = command.Split(' ', StringSplitOptions.RemoveEmptyEntries).Select(s => s.ToLower().Trim()).ToArray();
+                    var args = command.Split(' ', StringSplitOptions.RemoveEmptyEntries);
 
                     int from_side, from_level, from_position, to_side, to_level, to_position;
 
@@ -466,7 +519,7 @@ namespace LineMap.Managers
                         continue;
                     }
 
-                    ChainMissions(from_side, from_level, from_position, to_side, to_level, to_position, auto_next);
+                    ChainMissions(from_side, from_level, from_position, to_side, to_level, to_position, auto_next, shuffle);
                 }
                 else if (command == "display messages")
                 {
@@ -556,7 +609,7 @@ namespace LineMap.Managers
         bool CheckResultCorrectness(Message2013 result)
         {
             return
-                L2HandshakeProtocol.CheckMessageCorrectness(Device.IDPlc, 1, 2012, result) &&
+                L2HandshakeProtocol.CheckMessageCorrectness(Device.IDPlc, 1, Message2013.MESSAGE_ID, result) &&
 
                 (result.ORDER_ID != 0) &&
                 (result.MISSION_ID != 0) &&
@@ -579,23 +632,7 @@ namespace LineMap.Managers
 
         Message2012 GetEmptyMessage2012()
         {
-            return new Message2012(L2HandshakeProtocol.GetL2MessageFromDataFields(new List<string>()
-            {
-                nameof(Message2012.ORDER_ID),
-                nameof(Message2012.MISSION_ID),
-                nameof(Message2012.DEVICE_NR),
-                nameof(Message2012.MISSION_TYPE),
-                nameof(Message2012.TRACK_ID),
-                nameof(Message2012.SRC_DEVICE),
-                nameof(Message2012.SRC_SIDE),
-                nameof(Message2012.SRC_LEVEL),
-                nameof(Message2012.SRC_POSITION),
-                nameof(Message2012.DST_DEVICE),
-                nameof(Message2012.DST_SIDE),
-                nameof(Message2012.DST_LEVEL),
-                nameof(Message2012.DST_POSITION),
-                nameof(Message2012.BARCODE)
-            }))
+            return new Message2012(L2HandshakeProtocol.GetL2MessageFromNumberOfDataFields(Message2012.MESSAGE_DATA_FIELDS_NUM))
             {
                 PR_MSG = L2HandshakeProtocol.GetNextProgressive(),
                 ID_PLC = Device.IDPlc

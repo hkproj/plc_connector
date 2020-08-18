@@ -9,6 +9,8 @@ namespace LineMap.Messages.SA
     public class Message2013 : GenericL2Message
     {
 
+        public const int MESSAGE_ID = 2013;
+
         public Message2013(DataBlock other) : base(other)
         {
 

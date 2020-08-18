@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "LineMap": {
+      "commandName": "Project",
+      "commandLineArgs": "--connect sa5"
+    }
+  }
+}

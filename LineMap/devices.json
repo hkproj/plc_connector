@@ -1,13 +1,13 @@
 {
   "devices": {
-    "sa1": {
-      "ip_address": "172.21.3.110",
-      "id_plc": 41,
-      "device_nr": 3401,
-      "fifo_in_db_number": 303,
-      "fifo_in_pos_db_number": 304,
-      "fifo_out_db_number": 305,
-      "fifo_out_pos_db_number": 306
+    "sa5": {
+      "ip_address": "172.21.3.150",
+      "id_plc": 45,
+      "device_nr": 3405,
+      "fifo_in_db_number": 300,
+      "fifo_in_pos_db_number": 301,
+      "fifo_out_db_number": 302,
+      "fifo_out_pos_db_number": 303
     }
   }
 }

@@ -93,6 +93,11 @@ namespace PLCConnector.L2
             return GenerateL2MessageDescriptor(fields);
         }
 
+        public static DataBlock GetL2MessageFromNumberOfDataFields(int fields_count)
+        {
+            return GetL2MessageFromDataFields(GetRepeatedFieldNames(GENERIC_MESSAGE_DATA_NAME, fields_count));
+        }
+
         public static IEnumerable<string> GetRepeatedFieldNames(string base_name, int count)
         {
             for (int i = 1; i <= count; i++)
@@ -128,6 +133,32 @@ namespace PLCConnector.L2
             var response = GenerateL2MessageDescriptor(fields_names);
 
             return response;
+        }
+
+        public static DataBlock GetL2SendBuffer(IEnumerable<GenericL2Message> messages)
+        {
+            var total_msgs_len = messages.Sum(m => m.MSG_LEN);
+            var send_db = GenerateL2MessageDescriptor(GetRepeatedFieldNames(GENERIC_MESSAGE_DATA_NAME, total_msgs_len + 1));
+
+            // The first value is the total length of the messages
+            send_db.Fields[0].Value = total_msgs_len;
+
+            int i = 1;
+            int message_index = 0;
+
+            while (i < send_db.Fields.Count)
+            {
+                // Copy message field by field.
+                var message = messages.ElementAt(message_index);
+                for (int m = 0; m < message.Fields.Count; m++)
+                {
+                    send_db.Fields[i + m].Value = message.Fields[m].Value;
+                }
+
+                i += message.MSG_LEN;
+            }
+
+            return send_db;
         }
 
         public static IEnumerable<DataBlock> GetMessagesFromL2DB(DataBlock l2_db, out int total_words_read)

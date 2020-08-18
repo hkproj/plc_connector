@@ -9,12 +9,16 @@ namespace LineMap.Messages.SA
     public class Message2012 : GenericL2Message
     {
 
+        public const int MESSAGE_ID = 2012;
+        public const int MESSAGE_LENGTH = 20;
+        public const int MESSAGE_DATA_FIELDS_NUM = MESSAGE_LENGTH - L2HandshakeProtocol.L2_MESASGE_HEADER_SIZE - L2HandshakeProtocol.L2_MESASGE_FOOTER_SIZE;
+
         public Message2012(DataBlock other) : base(other)
         {
-            this.ID_MSG = 2012;
+            this.ID_MSG = MESSAGE_ID;
             this.ID_SRC = 1;
-            this.MSG_LEN = 20;
-            this.FOOTER = 20;
+            this.MSG_LEN = MESSAGE_LENGTH;
+            this.FOOTER = MESSAGE_LENGTH;
         }
 
         public int ORDER_ID

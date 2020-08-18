@@ -1,14 +1,8 @@
-﻿using PLCConnector;
-using System;
-using System.Linq;
-using System.Collections.Generic;
-using Serilog;
-using PLCConnector.L2;
-using LineMap.Messages;
-using PLCConnector.Siemens;
-using System.Threading;
-using LineMap.Messages.PA;
+﻿using Serilog;
 using LineMap.Managers;
+using Newtonsoft.Json.Linq;
+using System.IO;
+using Copto;
 
 namespace LineMap
 {
@@ -24,18 +18,56 @@ namespace LineMap
                 .WriteTo.ColoredConsole()
                 .CreateLogger();
 
-            var sa_manager = new StackerCraneInteractiveManager(new DeviceConfiguration()
-            {
-                FifoInDBNumber = 300,
-                FifoInPosDBNumber = 301,
-                FifoOutDBNumber = 302,
-                FifoOutPosDBNumber = 303,
-                IDDevice = 3400 + 5,
-                IDPlc = 40 + 5,
-                IPAddress = "172.21.3.150"
-            }, log);
+            var opts = Options.Parse(args);
 
-            sa_manager.Start();
+            var device_name = "";
+
+            opts.Apply(new RuleSet()
+            {
+                { "connect", (name) => device_name = name }
+            });
+
+            if (string.IsNullOrEmpty(device_name))
+            {
+                log.Error($"No device name was specified");
+                return;
+            }
+
+            var devices = JObject.Parse(File.ReadAllText(Path.GetFullPath("devices.json")));
+            var device = devices["devices"][device_name];
+
+            if (device == null)
+            {
+                log.Error($"No device with name {device_name} was found");
+                return;
+            }
+
+            var fifo_in_db_number = int.Parse(device["fifo_in_db_number"].Value<string>());
+            var fifo_in_pos_db_number = int.Parse(device["fifo_in_pos_db_number"].Value<string>());
+            var fifo_out_db_number = int.Parse(device["fifo_out_db_number"].Value<string>());
+            var fifo_out_pos_db_number = int.Parse(device["fifo_out_pos_db_number"].Value<string>());
+            var id_plc = int.Parse(device["id_plc"].Value<string>());
+            var device_nr = int.Parse(device["device_nr"].Value<string>());
+            var ip_address = device["ip_address"].Value<string>();
+
+            if (device_name.StartsWith("sa"))
+            {
+                var sa_manager = new StackerCraneInteractiveManager(new DeviceConfiguration()
+                {
+                    FifoInDBNumber = fifo_in_db_number,
+                    FifoInPosDBNumber = fifo_in_pos_db_number,
+                    FifoOutDBNumber = fifo_out_db_number,
+                    FifoOutPosDBNumber = fifo_out_pos_db_number,
+                    IDDevice = device_nr,
+                    IDPlc = id_plc,
+                    IPAddress = ip_address
+                }, log);
+                sa_manager.Start();
+            }
+            else
+            {
+                log.Error($"No interactive manager found for device {device_name}");
+            }
         }
 
         //static void PollPAMessages()
@@ -89,7 +121,7 @@ namespace LineMap
         //            else
         //            {
         //                var bg_message_1006 = new Message1006POY(message_1006);
-                        
+
         //                log.Information($"POY DOFFING - LINE({bg_message_1006.LINE_NR}),POSITION({bg_message_1006.POSITION_NR}),DOFF({bg_message_1006.DOFF_NR}),MACHINE({bg_message_1006.BG_MACHINE_NR}),POSITION({bg_message_1006.BG_POSITION_NR}),PRODUCT({bg_message_1006.BG_PRODUCT_DATA.Trim()}),EMPTY_TUBE_WEIGHT({bg_message_1006.BG_EMPTY_TUBE_WEIGHT})");
         //            }
         //        }
