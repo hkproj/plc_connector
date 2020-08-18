@@ -14,7 +14,7 @@ namespace LineMap.Managers
     public class StackerCraneInteractiveManager
     {
 
-        readonly ILogger Log;
+        readonly ILogger log;
 
         const int MISSION_TYPE_PICK = 1;
         const int MISSION_TYPE_DEPOSIT = 2;
@@ -55,7 +55,7 @@ namespace LineMap.Managers
         {
             this.Device = device;
             this.Client = new SiemensClient(Device.IPAddress);
-            this.Log = log;
+            this.log = log;
             this.Racks = new int[WAREHOUSE_SIDE_MAX, WAREHOUSE_LEVEL_MAX, WAREHOUSE_POSITION_MAX];
         }
 
@@ -104,7 +104,7 @@ namespace LineMap.Managers
 
         void DisplayFIFOINStatus()
         {
-            Log.Information($"FIFO_IN_POS_WRITE {ReadL2HandshakeData(Device.FifoInPosDBNumber)} - FIFO_IN_POS_READ {ReadL2HandshakeData(Device.FifoInDBNumber)}");
+            log.Information($"FIFO_IN_POS_WRITE {ReadL2HandshakeData(Device.FifoInPosDBNumber)} - FIFO_IN_POS_READ {ReadL2HandshakeData(Device.FifoInDBNumber)}");
         }
 
         bool PrepareFIFOToSend()
@@ -114,7 +114,7 @@ namespace LineMap.Managers
 
             if (l2_fifo_in_pos_read != 0)
             {
-                Log.Debug($"Emptying FIFO_IN and FIFO_IN_POS with {l2_fifo_in_pos_read} read words");
+                log.Debug($"Emptying FIFO_IN and FIFO_IN_POS with {l2_fifo_in_pos_read} read words");
 
                 WriteL2HandshakeData(Device.FifoInDBNumber, 0);
                 WriteL2HandshakeData(Device.FifoInPosDBNumber, 0);
@@ -123,7 +123,7 @@ namespace LineMap.Managers
             }
             else if (l2_fifo_in_pos_read == 0 && l2_fifo_in_pos_write == 0)
             {
-                Log.Debug($"FIFO_IN ready to accept commands");
+                log.Debug($"FIFO_IN ready to accept commands");
                 return true;
             }
             else
@@ -142,7 +142,7 @@ namespace LineMap.Managers
 
             if (messages.Count() > 0)
             {
-                Log.Debug($"Emptying FIFO_OUT with {total_words_read} read words and {messages.Count()} total messages");
+                log.Debug($"Emptying FIFO_OUT with {total_words_read} read words and {messages.Count()} total messages");
                 WriteL2HandshakeData(Device.FifoOutPosDBNumber, total_words_read);
             }
 
@@ -151,9 +151,9 @@ namespace LineMap.Managers
 
         void ChainMissions(int from_side, int from_level, int from_pos, int to_side, int to_level, int to_pos, bool auto_next = false, bool shuffle = false)
         {
-            Log.Debug($"Starting chain from Side {from_side} Level {from_level} Position {from_pos} to Side {to_side} Level {to_level} Position {to_pos}");
-            Log.Debug($"Shuffle: {shuffle}");
-            Log.Debug($"Auto Next: {auto_next}");
+            log.Debug($"Starting chain from Side {from_side} Level {from_level} Position {from_pos} to Side {to_side} Level {to_level} Position {to_pos}");
+            log.Debug($"Shuffle: {shuffle}");
+            log.Debug($"Auto Next: {auto_next}");
 
             var stop = false;
 
@@ -170,7 +170,7 @@ namespace LineMap.Managers
                 }
             }
 
-            Log.Debug($"Total missions: {missions.Count}");
+            log.Debug($"Total missions: {missions.Count}");
 
             if (shuffle)
             {
@@ -191,21 +191,21 @@ namespace LineMap.Managers
 
                 if (!CheckResultCorrectness(pick_result))
                 {
-                    Log.Error("Invalid pick result received");
+                    log.Error("Invalid pick result received");
                     stop = true;
                 }
                 else if (pick_result.MISSION_RESULT == MISSION_RESULT_ABORTED && pick_result.STEP_RESULT == STEP_RESULT_RACK_ON_BOARD)
                 {
-                    Log.Error("Can't pick, SA has rack on board");
+                    log.Error("Can't pick, SA has rack on board");
                     stop = true;
                 }
                 else if (pick_result.MISSION_RESULT == MISSION_RESULT_ABORTED && pick_result.STEP_RESULT == STEP_RESULT_EMPTY_TO_EMPTY)
                 {
-                    Log.Error("Skipping empty cell");
+                    log.Error("Skipping empty cell");
                 }
                 else if (pick_result.MISSION_RESULT == MISSION_RESULT_ABORTED)
                 {
-                    Log.Error("Mission aborted, stopping chain.");
+                    log.Error("Mission aborted, stopping chain.");
                     stop = true;
                 }
                 else
@@ -214,12 +214,12 @@ namespace LineMap.Managers
 
                     if (!CheckResultCorrectness(deposit_result))
                     {
-                        Log.Error("Invalid deposit result received");
+                        log.Error("Invalid deposit result received");
                         stop = true;
                     }
                     else if (deposit_result.MISSION_RESULT == MISSION_RESULT_ABORTED)
                     {
-                        Log.Error("Deposit mission aborted, stopping chain.");
+                        log.Error("Deposit mission aborted, stopping chain.");
                         stop = true;
                     }
                 }
@@ -238,7 +238,7 @@ namespace LineMap.Managers
                             stop = true;
                         else if (command == "autonext")
                         {
-                            Log.Verbose("Activating auto next on chain");
+                            log.Verbose("Activating auto next on chain");
                             auto_next = true;
                             break;
                         }
@@ -247,13 +247,13 @@ namespace LineMap.Managers
                     }
                 }
 
-                Log.Debug($"Remaining {missions.Count - (m + 1)} missions");
+                log.Debug($"Remaining {missions.Count - (m + 1)} missions");
             }
 
             if (stop)
-                Log.Warning("Chain stopped");
+                log.Warning("Chain stopped");
             else
-                Log.Information("Chain successfully completed");
+                log.Information("Chain successfully completed");
         }
 
         DataBlock SendMissionAndDisplayResult(Message2012 mission, bool dequeue_first = true)
@@ -269,7 +269,7 @@ namespace LineMap.Managers
                 Thread.Sleep(SLEEP_TIME);
 
                 if (IntervalReached(start_time_fifo_ready, 5))
-                    Log.Debug("Still waiting for result");
+                    log.Debug("Still waiting for result");
 
                 if (IntervalReached(start_time_fifo_ready, 1))
                     fifo_in_ready = PrepareFIFOToSend();
@@ -278,7 +278,7 @@ namespace LineMap.Managers
             var to_write_on_plc = GetL2BufferToSendMessages(new List<Message2012>() { mission });
             Client.WriteRawData(Device.FifoInDBNumber, 0, to_write_on_plc.Length, to_write_on_plc);
 
-            Log.Debug("Mission sent, waiting for results...");
+            log.Debug("Mission sent, waiting for results...");
 
             var results = DequeueAllMessages();
             var start_time_queue = DateTime.UtcNow;
@@ -288,7 +288,7 @@ namespace LineMap.Managers
                 Thread.Sleep(SLEEP_TIME);
 
                 if (IntervalReached(start_time_queue, 40))
-                    Log.Debug("Still waiting for result");
+                    log.Debug("Still waiting for result");
 
                 if (IntervalReached(start_time_queue, 1))
                     results = DequeueAllMessages();
@@ -344,7 +344,7 @@ namespace LineMap.Managers
             foreach (var result in results)
             {
                 var result_msg = new Message2013(result);
-                Log.Information($"MISSION {MissionTypeDescription(result_msg.MISSION_TYPE)} - DEVICE {DeviceDescription(result_msg.DEVICE)} - SIDE {result_msg.SIDE} - LEVEL {result_msg.LEVEL} - POSITION {result_msg.POSITION} - STEP_RESULT {result_msg.STEP_RESULT} - MISSION_RESULT {result_msg.MISSION_RESULT}");
+                log.Information($"MISSION {MissionTypeDescription(result_msg.MISSION_TYPE)} - DEVICE {DeviceDescription(result_msg.DEVICE)} - SIDE {result_msg.SIDE} - LEVEL {result_msg.LEVEL} - POSITION {result_msg.POSITION} - STEP_RESULT {result_msg.STEP_RESULT} - MISSION_RESULT {result_msg.MISSION_RESULT}");
             }
         }
 
@@ -358,7 +358,7 @@ namespace LineMap.Managers
             }
             else
             {
-                Log.Information("No messages");
+                log.Information("No messages");
             }
         }
 
@@ -376,12 +376,12 @@ namespace LineMap.Managers
                 if (command == "all empty")
                 {
                     MakeAllSameID(EMPTY_CELL_RACK_ID);
-                    Log.Information("All cells made empty");
+                    log.Information("All cells made empty");
                 }
                 else if (command == "all full")
                 {
                     MakeAllSameID(MOCK_RACK_ID);
-                    Log.Information("All cells made full");
+                    log.Information("All cells made full");
                 }
                 else if (command == "display empty cells")
                 {
@@ -392,7 +392,7 @@ namespace LineMap.Managers
                             for (int position = 0; position < WAREHOUSE_POSITION_MAX; position++)
                             {
                                 if (Racks[side,level,position] == EMPTY_CELL_RACK_ID)
-                                    Log.Information($"Side {side + 1} Level {level + 1} Position {position + 1} Empty");
+                                    log.Information($"Side {side + 1} Level {level + 1} Position {position + 1} Empty");
                             }
                         }
                     }
@@ -403,7 +403,7 @@ namespace LineMap.Managers
 
                     if (args.Length != 6)
                     {
-                        Log.Error("Invalid command format");
+                        log.Error("Invalid command format");
                         continue;
                     }
 
@@ -417,13 +417,13 @@ namespace LineMap.Managers
                     }
                     catch (FormatException)
                     {
-                        Log.Error("Error parsing command");
+                        log.Error("Error parsing command");
                         continue;
                     }
 
                     if (!CheckDeviceLimits(DEVICE_WAREHOUSE, side, level, position))
                     {
-                        Log.Error("Invalid warehouse limits");
+                        log.Error("Invalid warehouse limits");
                         continue;
                     }
 
@@ -432,23 +432,23 @@ namespace LineMap.Managers
                     if (operation == "full")
                     {
                         Racks[side, level, position] = MOCK_RACK_ID;
-                        Log.Information($"Side {side} Level {level} Position {position} made full");
+                        log.Information($"Side {side} Level {level} Position {position} made full");
                     }
                     else if (operation == "empty")
                     {
                         Racks[side, level, position] = EMPTY_CELL_RACK_ID;
-                        Log.Information($"Side {side} Level {level} Position {position} made empty");
+                        log.Information($"Side {side} Level {level} Position {position} made empty");
                     }
                     else
                     {
-                        Log.Error("Invalid operation");
+                        log.Error("Invalid operation");
                         continue;
                     }
                 }
                 else if (command == "empty fifo out")
                 {
                     DequeueAllMessages();
-                    Log.Information("L2 fifo emptied");
+                    log.Information("L2 fifo emptied");
                 }
                 else if (command.StartsWith("pick") || command.StartsWith("dep"))
                 {
@@ -456,7 +456,7 @@ namespace LineMap.Managers
 
                     if (args.Length != 4)
                     {
-                        Log.Error("Invalid command format");
+                        log.Error("Invalid command format");
                         continue;
                     }
 
@@ -470,13 +470,13 @@ namespace LineMap.Managers
                     }
                     catch (FormatException)
                     {
-                        Log.Error("Error parsing command");
+                        log.Error("Error parsing command");
                         continue;
                     }
 
                     if (!CheckDeviceLimits(DEVICE_WAREHOUSE, side, level, position))
                     {
-                        Log.Error("Invalid warehouse limits");
+                        log.Error("Invalid warehouse limits");
                         continue;
                     }
 
@@ -507,7 +507,7 @@ namespace LineMap.Managers
                     }
                     catch (FormatException)
                     {
-                        Log.Error("Error parsing command");
+                        log.Error("Error parsing command");
                         continue;
                     }
 
@@ -515,7 +515,7 @@ namespace LineMap.Managers
                         !CheckDeviceLimits(DEVICE_WAREHOUSE, to_side, to_level, to_position) ||
                         to_side < from_side || to_level < from_level || to_position < from_position)
                     {
-                        Log.Error("Invalid warehouse limits");
+                        log.Error("Invalid warehouse limits");
                         continue;
                     }
 
@@ -538,7 +538,7 @@ namespace LineMap.Managers
                     break;
                 }
                 else
-                    Log.Information("Unknown command");
+                    log.Information("Unknown command");
             }
 
             Console.WriteLine("Bye bye");
