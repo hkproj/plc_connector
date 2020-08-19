@@ -51,6 +51,13 @@ namespace LineMap.Managers
 
         const int SLEEP_TIME = 50;
 
+        enum ChainType
+        {
+            Progressive,
+            RandomPickAndDepositSameCell,
+            RandomPickAndDepositToRandomCell
+        }
+
         public StackerCraneInteractiveManager(DeviceConfiguration device, ILogger log)
         {
             this.Device = device;
@@ -71,6 +78,16 @@ namespace LineMap.Managers
                     }
                 }
             }
+        }
+
+        void ChangeRackID(int side, int level, int position, int rack_id)
+        {
+            Racks[side - 1, level - 1, position - 1] = rack_id;
+        }
+
+        int GetRackID(int side, int level, int position)
+        {
+            return Racks[side - 1, level - 1, position - 1];
         }
 
         int ReadL2HandshakeData(int db_number)
@@ -149,45 +166,107 @@ namespace LineMap.Managers
             return messages;
         }
 
-        void ChainMissions(int from_side, int from_level, int from_pos, int to_side, int to_level, int to_pos, bool auto_next = false, bool shuffle = false)
+        void DisplayCellsWithRackID(int rack_id)
+        {
+            for (int side = 0; side < WAREHOUSE_SIDE_MAX; side++)
+            {
+                for (int level = 0; level < WAREHOUSE_LEVEL_MAX; level++)
+                {
+                    for (int position = 0; position < WAREHOUSE_POSITION_MAX; position++)
+                    {
+                        if (Racks[side, level, position] == rack_id)
+                            log.Information($"Side {side + 1} Level {level + 1} Position {position + 1} with Rack ID {rack_id}");
+                    }
+                }
+            }
+        }
+
+        void ChainMissions(int from_side, int from_level, int from_pos, int to_side, int to_level, int to_pos, ChainType chain_type, bool auto_next = false)
         {
             log.Debug($"Starting chain from Side {from_side} Level {from_level} Position {from_pos} to Side {to_side} Level {to_level} Position {to_pos}");
-            log.Debug($"Shuffle: {shuffle}");
+            log.Debug($"Mission Type: {chain_type}");
             log.Debug($"Auto Next: {auto_next}");
 
             var stop = false;
 
-            var missions = new List<Tuple<int, int, int>>();
+            var cells = new List<Tuple<int, int, int>>();
 
-            for (int side = from_side; side <= to_side; side++)
+            for (var side = from_side; side <= to_side; side++)
             {
                 for (var level = (side == from_side ? from_level : 1); level <= to_level; level++)
                 {
-                    for (int position = (level == from_level && side == from_side ? from_pos : 1); position <= to_pos; position++)
+                    for (var position = (level == from_level && side == from_side ? from_pos : 1); position <= to_pos; position++)
                     {
-                        missions.Add(new Tuple<int, int, int>(side, level, position));
+                        var cell = new Tuple<int, int, int>(side, level, position);
+
+                        cells.Add(cell);
                     }
+                }
+            }
+
+            if (chain_type == ChainType.RandomPickAndDepositSameCell)
+            {
+                var rnd = new Random();
+                cells = cells.OrderBy(m => rnd.Next()).ToList();
+            }
+
+            // Each mission is a pick followed by a deposit
+            var missions = new List<Tuple<int, int, int>>();
+
+            if (chain_type == ChainType.Progressive || chain_type == ChainType.RandomPickAndDepositSameCell)
+            {
+                for (var i = 0; i < cells.Count; i++)
+                {
+                    missions.Add(cells[i]);
+                    missions.Add(cells[i]);
+                }
+            }
+            else if (chain_type == ChainType.RandomPickAndDepositToRandomCell)
+            {
+                var rnd = new Random();
+
+                var initial_empty_positions = cells.Where((p) => GetRackID(p.Item1, p.Item2, p.Item3) == EMPTY_CELL_RACK_ID).ToList();
+
+                var initial_full_positions = cells.Where((p) => GetRackID(p.Item1, p.Item2, p.Item3) == MOCK_RACK_ID).OrderBy(c => rnd.Next()).ToList();
+
+                if (initial_empty_positions.Count == 0 || initial_full_positions.Count == 0)
+                {
+                    Log.Error("Not enough empty or full positions");
+                    return;
+                }
+
+                var current_empty_positions = initial_empty_positions.ToList();
+
+                for (var i = 0; i < initial_full_positions.Count; i++)
+                {
+                    var pick_position = initial_full_positions[i];
+                    missions.Add(pick_position);
+
+                    var deposit_position_index = rnd.Next(0, current_empty_positions.Count);
+                    var deposit_position = current_empty_positions[deposit_position_index];
+                    missions.Add(deposit_position);
+
+                    current_empty_positions.RemoveAt(deposit_position_index);
+                    current_empty_positions.Add(pick_position);
                 }
             }
 
             log.Debug($"Total missions: {missions.Count}");
 
-            if (shuffle)
-            {
-                var rnd = new Random();
-                missions = missions.OrderBy(m => rnd.Next()).ToList();
-            }
+            bool dequeue_messages = true;
 
-            for (int m = 0; m < missions.Count; m++)
+            for (var m = 0; m < missions.Count; m += 2)
             {
                 if (stop)
                     break;
 
                 var next = false;
 
-                var (side, level, position) = missions[m];
+                var (pick_side, pick_level, pick_position) = missions[m];
 
-                var pick_result = new Message2013(SendPick(DEVICE_WAREHOUSE, side, level, position, (side == from_side && level == from_level && position == from_pos)));
+                var pick_result = new Message2013(SendPick(DEVICE_WAREHOUSE, pick_side, pick_level, pick_position, dequeue_messages));
+
+                dequeue_messages = false;
 
                 if (!CheckResultCorrectness(pick_result))
                 {
@@ -210,7 +289,13 @@ namespace LineMap.Managers
                 }
                 else
                 {
-                    var deposit_result = new Message2013(SendDeposit(DEVICE_WAREHOUSE, side, level, position, false));
+                    ChangeRackID(pick_side, pick_level, pick_position, EMPTY_CELL_RACK_ID);
+
+                    // Display empty cells after successful pick
+                    DisplayCellsWithRackID(EMPTY_CELL_RACK_ID);
+
+                    var (deposit_side, deposit_level, deposit_position) = missions[m + 1];
+                    var deposit_result = new Message2013(SendDeposit(DEVICE_WAREHOUSE, deposit_side, deposit_level, deposit_position, false));
 
                     if (!CheckResultCorrectness(deposit_result))
                     {
@@ -222,6 +307,10 @@ namespace LineMap.Managers
                         log.Error("Deposit mission aborted, stopping chain.");
                         stop = true;
                     }
+
+                    // Display empty cells after successful deposit
+                    ChangeRackID(deposit_side, deposit_level, deposit_position, MOCK_RACK_ID);
+                    DisplayCellsWithRackID(EMPTY_CELL_RACK_ID);
                 }
 
                 if (!auto_next && !stop)
@@ -278,7 +367,12 @@ namespace LineMap.Managers
             var to_write_on_plc = GetL2BufferToSendMessages(new List<Message2012>() { mission });
             Client.WriteRawData(Device.FifoInDBNumber, 0, to_write_on_plc.Length, to_write_on_plc);
 
-            log.Debug("Mission sent, waiting for results...");
+            var device_help = DeviceDescription(mission.MISSION_TYPE == MISSION_TYPE_PICK ? mission.SRC_DEVICE : mission.DST_DEVICE);
+            var side_help = mission.MISSION_TYPE == MISSION_TYPE_PICK ? mission.SRC_SIDE : mission.DST_SIDE;
+            var level_help = mission.MISSION_TYPE == MISSION_TYPE_PICK ? mission.SRC_LEVEL : mission.DST_LEVEL;
+            var position_help = mission.MISSION_TYPE == MISSION_TYPE_PICK ? mission.SRC_POSITION : mission.DST_POSITION;
+
+            log.Debug($"Mission {mission.MISSION_TYPE} on Device {device_help} Side {side_help} Level {level_help} Position {position_help} sent, waiting for results...");
 
             var results = DequeueAllMessages();
             var start_time_queue = DateTime.UtcNow;
@@ -385,17 +479,7 @@ namespace LineMap.Managers
                 }
                 else if (command == "display empty cells")
                 {
-                    for (int side = 0; side < WAREHOUSE_SIDE_MAX; side++)
-                    {
-                        for (int level = 0; level < WAREHOUSE_LEVEL_MAX; level++)
-                        {
-                            for (int position = 0; position < WAREHOUSE_POSITION_MAX; position++)
-                            {
-                                if (Racks[side,level,position] == EMPTY_CELL_RACK_ID)
-                                    log.Information($"Side {side + 1} Level {level + 1} Position {position + 1} Empty");
-                            }
-                        }
-                    }
+                    DisplayCellsWithRackID(EMPTY_CELL_RACK_ID);
                 }
                 else if (command.StartsWith("make cell"))
                 {
@@ -431,12 +515,12 @@ namespace LineMap.Managers
 
                     if (operation == "full")
                     {
-                        Racks[side, level, position] = MOCK_RACK_ID;
+                        ChangeRackID(side, level, position, MOCK_RACK_ID);
                         log.Information($"Side {side} Level {level} Position {position} made full");
                     }
                     else if (operation == "empty")
                     {
-                        Racks[side, level, position] = EMPTY_CELL_RACK_ID;
+                        ChangeRackID(side, level, position, EMPTY_CELL_RACK_ID);
                         log.Information($"Side {side} Level {level} Position {position} made empty");
                     }
                     else
@@ -492,8 +576,9 @@ namespace LineMap.Managers
 
                     int from_side, from_level, from_position, to_side, to_level, to_position;
 
-                    bool auto_next = args.Contains("autonext");
+                    bool auto_next = args.Contains("auto_next");
                     bool shuffle = args.Contains("shuffle");
+                    bool shuffle_empty = args.Contains("shuffle_empty");
 
                     try
                     {
@@ -519,7 +604,14 @@ namespace LineMap.Managers
                         continue;
                     }
 
-                    ChainMissions(from_side, from_level, from_position, to_side, to_level, to_position, auto_next, shuffle);
+                    var chain_type = ChainType.Progressive;
+
+                    if (shuffle)
+                        chain_type = ChainType.RandomPickAndDepositSameCell;
+                    else if (shuffle_empty)
+                        chain_type = ChainType.RandomPickAndDepositToRandomCell;
+
+                    ChainMissions(from_side, from_level, from_position, to_side, to_level, to_position, chain_type, auto_next);
                 }
                 else if (command == "display messages")
                 {
