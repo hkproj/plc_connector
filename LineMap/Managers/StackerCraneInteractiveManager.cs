@@ -8,6 +8,7 @@ using System.Text;
 using PLCConnector;
 using LineMap.Messages.SA;
 using System.Threading;
+using LineMap.Utils;
 
 namespace LineMap.Managers
 {
@@ -353,14 +354,17 @@ namespace LineMap.Managers
             bool fifo_in_ready = PrepareFIFOToSend();
             var start_time_fifo_ready = DateTime.UtcNow;
 
+            var still_waiting_for_result = new IntervalTimer(start_time_fifo_ready, 5);
+            var prepare_fifo_to_send = new IntervalTimer(start_time_fifo_ready, 1);
+
             while (!fifo_in_ready)
             {
                 Thread.Sleep(SLEEP_TIME);
 
-                if (IntervalReached(start_time_fifo_ready, 5))
+                if (still_waiting_for_result.Elapsed)
                     log.Debug("Still waiting for result");
 
-                if (IntervalReached(start_time_fifo_ready, 1))
+                if (prepare_fifo_to_send.Elapsed)
                     fifo_in_ready = PrepareFIFOToSend();
             }
 
@@ -377,25 +381,22 @@ namespace LineMap.Managers
             var results = DequeueAllMessages();
             var start_time_queue = DateTime.UtcNow;
 
+            var still_waiting_for_result_2 = new IntervalTimer(start_time_queue, 40);
+            var dequeue_all_messages = new IntervalTimer(start_time_queue, 1);
+
             while (results.Count() == 0)
             {
                 Thread.Sleep(SLEEP_TIME);
 
-                if (IntervalReached(start_time_queue, 40))
+                if (still_waiting_for_result_2.Elapsed)
                     log.Debug("Still waiting for result");
 
-                if (IntervalReached(start_time_queue, 1))
+                if (dequeue_all_messages.Elapsed)
                     results = DequeueAllMessages();
             }
 
             DisplayMessages(results);
             return results.First();
-        }
-
-        bool IntervalReached(DateTime start_time, int interval)
-        {
-            var interval_so_far = (int)(DateTime.UtcNow - start_time).TotalSeconds;
-            return (interval_so_far > interval && (interval_so_far % interval == 0));
         }
 
         DataBlock SendDeposit(int device, int side, int row, int pos, bool dequeue_first = true)
